@@ -2,7 +2,7 @@ fastapi==0.103.1
 uvicorn==0.23.2
 jinja2==3.1.2
 llama-index==0.9.10
-sentence-transformers==2.2.2
+sentence-transformers==2.7.0
 faiss-cpu==1.7.4
 pytesseract==0.3.10
 beautifulsoup4==4.12.2
@@ -14,3 +14,12 @@ openpyxl==3.1.2
 pdfplumber==0.10.2
 pillow==10.0.0
 pytest==7.4.0
+pydantic==2.5.0
+pydantic_core==2.14.1
+numpy==1.23.5
+torch==1.13.1
+regex==2023.10.3
+nltk==3.8.1
+huggingface_hub==0.23.0
+transformers==4.39.3
+tokenizers==0.15.2

@@ -8,4 +8,4 @@ class Embedder:
 
     def encode(self, text):
         """Generate embeddings for text."""
-        return self.model.encode(text, convert_to_numpy=True).astype('float32')
+        return self.model.encode(text, convert_to_numpy=True, normalize_embeddings=True).astype('float32')
