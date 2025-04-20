@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document QA System</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-6 bg-white shadow-lg rounded-lg mt-6">
+        <h1 class="text-3xl font-bold text-gray-800 mb-4">AI-Powered Document QA System</h1>
+        <p class="text-gray-600 mb-6">Upload files (PDF, DOCX, PPTX, XLSX, CSV, JSON, TXT, PNG, JPG) and ask questions based on their content.</p>
+        <form method="post" enctype="multipart/form-data" action="/upload">
+            <input type="file" name="files" multiple accept=".pdf,.docx,.pptx,.xlsx,.csv,.json,.txt,.png,.jpg" class="w-full p-2 border rounded mb-4">
+            <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Upload Files</button>
+        </form>
+    </div>
+</body>
+</html>

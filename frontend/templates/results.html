@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QA Results</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-6 bg-white shadow-lg rounded-lg mt-6">
+        <h1 class="text-3xl font-bold text-gray-800 mb-4">Document QA Results</h1>
+        <form method="post" action="/query" class="mb-6">
+            <input type="text" name="query" placeholder="Ask a question..." required class="w-full p-2 border rounded mb-2">
+            <button type="submit" name="action" value="ask" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 mr-2">Ask Question</button>
+            <button type="submit" name="action" value="summarize" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Summarize Documents</button>
+        </form>
+
+        {% if answer %}
+            <h2 class="text-2xl font-semibold text-gray-700 mb-2">Answer:</h2>
+            <p class="text-gray-600">{{ answer }}</p>
+            {% if references %}
+                <h3 class="text-xl font-semibold text-gray-700 mt-4 mb-2">References:</h3>
+                <ul class="list-disc pl-6">
+                    {% for ref in references %}
+                        <li>{{ ref }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        {% endif %}
+
+        {% if summary %}
+            <h2 class="text-2xl font-semibold text-gray-700 mb-2">Summary:</h2>
+            <p class="text-gray-600">{{ summary }}</p>
+        {% endif %}
+
+        <a href="/" class="text-blue-500 hover:underline mt-6 inline-block">Upload More Files</a>
+    </div>
+</body>
+</html>

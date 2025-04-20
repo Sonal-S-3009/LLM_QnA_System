@@ -1,30 +1,21 @@
-from sentence_transformers import SentenceTransformer
-import faiss
-import numpy as np
+from models.embedder import Embedder
+from models.retriever import Retriever
+from llama_index.core import Document
 import pandas as pd
 import re
-from llama_index.core import Document
+from utils.file_utils import process_file
 
-# Initialize Sentence Transformer and FAISS
-model = SentenceTransformer('all-MiniLM-L6-v2')
-dimension = 384
-faiss_index = faiss.IndexFlatL2(dimension)
-
-# Global storage
-documents = []
-embeddings = []
+embedder = Embedder()
+retriever = Retriever()
 dataframes = []
 
 
 def index_documents(file_paths):
     """Index documents and their embeddings."""
-    global documents, embeddings, faiss_index, dataframes
-    from utils.file_processor import process_file
-
+    global dataframes
     documents = []
     embeddings = []
     dataframes = []
-    faiss_index = faiss.IndexFlatL2(dimension)
 
     for file_path in file_paths:
         text, df, filename = process_file(file_path)
@@ -32,17 +23,15 @@ def index_documents(file_paths):
             doc = Document(text=text, metadata={"filename": filename})
             documents.append(doc)
             dataframes.append((df, filename))
-            embedding = model.encode(text, convert_to_numpy=True)
+            embedding = embedder.encode(text)
             embeddings.append(embedding)
 
-    if embeddings:
-        embeddings = np.array(embeddings).astype('float32')
-        faiss_index.add(embeddings)
+    retriever.add_documents(embeddings, documents)
 
 
 def answer_query(query):
     """Answer a query with references."""
-    if not documents:
+    if not retriever.documents:
         return "No documents uploaded.", []
 
     query_lower = query.lower()
@@ -72,10 +61,9 @@ def answer_query(query):
                 except Exception as e:
                     return f"Data Query Error: {str(e)}", []
 
-    query_embedding = model.encode(query, convert_to_numpy=True).astype('float32')
-    D, I = faiss_index.search(np.array([query_embedding]), k=3)
+    query_embedding = embedder.encode(query)
+    relevant_docs = retriever.search(query_embedding)
 
-    relevant_docs = [(documents[i].text, documents[i].metadata["filename"]) for i in I[0] if i >= 0]
     if not relevant_docs:
         return "Information not available in uploaded documents.", []
 
@@ -97,9 +85,9 @@ def answer_query(query):
 
 def summarize_documents():
     """Summarize all documents."""
-    if not documents:
+    if not retriever.documents:
         return "No documents uploaded."
 
-    all_text = "\n".join([doc.text for doc in documents])
-    words = all_text.split()[:200]  # Basic summary: first 200 words
+    all_text = "\n".join([doc.text for doc in retriever.documents])
+    words = all_text.split()[:200]
     return " ".join(words) + "..."
