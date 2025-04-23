@@ -1,20 +1,25 @@
 import pdfplumber
-from PIL import Image
 import pytesseract
+from PIL import Image
+import io
 
-def parse_pdf(file_path):
-    """Extract text from PDFs, including image-based ones."""
-    try:
-        with pdfplumber.open(file_path) as pdf:
-            text = ""
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-                else:
-                    img = page.to_image().original
-                    ocr_text = pytesseract.image_to_string(img)
-                    text += ocr_text + "\n"
-            return text if text.strip() else "No text found in PDF."
-    except Exception as e:
-        return f"PDF Extraction Error: {str(e)}"
+def parse_pdf(file_path: str) -> str:
+       """Parse text and images from a PDF file."""
+       try:
+           text = []
+           with pdfplumber.open(file_path) as pdf:
+               for page in pdf.pages:
+                   # Extract text
+                   page_text = page.extract_text()
+                   if page_text:
+                       text.append(page_text)
+                   # Extract images for OCR
+                   for img in page.images:
+                       img_data = img['stream'].get_data()
+                       image = Image.open(io.BytesIO(img_data))
+                       ocr_text = pytesseract.image_to_string(image)
+                       if ocr_text.strip():
+                           text.append(ocr_text)
+           return '\n'.join(text) if text else "No text extracted from PDF."
+       except Exception as e:
+           return f"Error parsing PDF: {str(e)}"
