@@ -2,7 +2,7 @@ from models.embedder import Embedder
 from models.vector_store import VectorStore
 from llama_index import Document
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains import RetrievalQA
+from langchain.chains import LLMChain
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 from langchain_community.cache import InMemoryCache
@@ -23,7 +23,7 @@ api_key = os.getenv("GOOGLE_API_KEY")
 # Enable semantic caching
 langchain.llm_cache = InMemoryCache()
 
-# Define prompt template with explicit input variables
+# Define prompt template
 qa_prompt_template = """Use the following context to answer the query concisely and accurately. If the context doesn't contain relevant information, say so.
 Context: {context}
 Query: {query}
@@ -50,23 +50,16 @@ class QAPipeline:
         except Exception as e:
             logging.error(f"Error initializing LLM: {str(e)}\n{traceback.format_exc()}")
             raise
-        # Initialize FAISS with a dummy document to set up embedding function
         try:
             self.vectorstore = FAISS.from_texts([""], self.embedder.embedding_function())
         except Exception as e:
             logging.error(f"Error initializing FAISS: {str(e)}\n{traceback.format_exc()}")
             raise
         try:
-            self.qa_chain = RetrievalQA.from_chain_type(
-                llm=self.llm,
-                chain_type="stuff",
-                retriever=self.vectorstore.as_retriever(search_kwargs={"k": 3}),
-                return_source_documents=True,
-                chain_type_kwargs={"prompt": qa_prompt}
-            )
-            logging.debug(f"RetrievalQA chain initialized with input_variables: {qa_prompt.input_variables}")
+            self.qa_chain = LLMChain(llm=self.llm, prompt=qa_prompt)
+            logging.debug(f"LLMChain initialized with input_variables: {qa_prompt.input_variables}")
         except Exception as e:
-            logging.error(f"Error initializing RetrievalQA: {str(e)}\n{traceback.format_exc()}")
+            logging.error(f"Error initializing LLMChain: {str(e)}\n{traceback.format_exc()}")
             raise
 
     def index_documents(self, texts, filenames):
@@ -79,25 +72,28 @@ class QAPipeline:
                 self.embedder.embedding_function(),
                 metadatas=[{"filename": f} for f in filenames]
             )
-            self.qa_chain.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 3})
         except Exception as e:
             logging.error(f"Error indexing documents: {str(e)}\n{traceback.format_exc()}")
             raise
 
     def answer_query(self, query):
-        """Answer a query using RetrievalQA chain."""
-        logging.debug(f"Invoking QA chain with query: {query}")
+        """Answer a query using manual retrieval and LLMChain."""
+        logging.debug(f"Processing query: {query}")
         try:
-            # Use dictionary input for langchain>=0.3.0
-            input_dict = {"query": query}
+            # Retrieve relevant documents
+            docs = self.vectorstore.similarity_search(query, k=3)
+            context = "\n".join([doc.page_content for doc in docs])
+            references = [
+                {"filename": doc.metadata["filename"], "score": 1.0}
+                for doc in docs
+            ]
+            logging.debug(f"Retrieved {len(docs)} documents for context: {len(context)} characters")
+            # Run LLMChain with context and query
+            input_dict = {"context": context, "query": query}
             logging.debug(f"Input to QA chain: {input_dict}")
             result = self.qa_chain.invoke(input_dict)
             logging.debug(f"QA chain result: {result}")
-            answer = result["result"].strip()
-            references = [
-                {"filename": doc.metadata["filename"], "score": 1.0}
-                for doc in result["source_documents"]
-            ]
+            answer = result["text"].strip()
             return answer, references
         except Exception as e:
             logging.error(f"Error in answer_query: {str(e)}\n{traceback.format_exc()}")
