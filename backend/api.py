@@ -1,149 +1,224 @@
-from fastapi import APIRouter, Request, File, UploadFile, Form, HTTPException
-from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
-from models.qa_pipeline import QAPipeline
 import os
-from backend.config import UPLOAD_DIR
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, UnstructuredPowerPointLoader, UnstructuredExcelLoader, CSVLoader, JSONLoader, TextLoader
-from PIL import Image
-import pytesseract
 import logging
-import io
-import requests
-from bs4 import BeautifulSoup
-import pdfplumber
+import pytesseract
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form
+from typing import List
 import traceback
+from models.qa_pipeline import QAPipeline
+from backend.config import UPLOAD_DIR
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    Docx2txtLoader,
+    UnstructuredPowerPointLoader,
+    UnstructuredExcelLoader,
+    CSVLoader,
+    JSONLoader,
+    TextLoader,
+    UnstructuredImageLoader,
+    WebBaseLoader,
+)
+from unstructured.partition.auto import partition  # Direct unstructured import
 
-logging.basicConfig(level=logging.DEBUG)
-router = APIRouter()
-templates = Jinja2Templates(directory="frontend/templates")
-qa_pipeline = QAPipeline()
-
+# Set Tesseract path for Windows
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-def extract_text_from_image(file_path):
-    """Extract text from an image using OCR."""
-    try:
-        img = Image.open(file_path)
-        text = pytesseract.image_to_string(img)
-        return text
-    except Exception as e:
-        logging.error(f"Error in OCR for {file_path}: {str(e)}")
-        return ""
+router = APIRouter()
+qa_pipeline = QAPipeline()
 
-def crawl_hyperlink(url):
-    """Crawl a URL and extract text content."""
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        text = ' '.join(p.get_text() for p in soup.find_all(['p', 'h1', 'h2', 'h3']))
-        return text
-    except Exception as e:
-        logging.error(f"Error crawling {url}: {str(e)}")
-        return ""
 
-def parse_file(file_path, filename):
-    """Parse various file types using LangChain loaders or pdfplumber for PDFs."""
+async def parse_file(file: UploadFile):
+    """Parse uploaded file based on its extension."""
+    filename = file.filename
+    file_ext = os.path.splitext(filename)[1].lower()
+    file_path = os.path.join(UPLOAD_DIR, filename)
+
+    # Save file to disk
     try:
-        ext = os.path.splitext(filename)[1].lower()
-        logging.debug(f"Parsing file: {filename} with extension: {ext}")
-        if ext == '.pdf':
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+    except Exception as e:
+        logging.error(f"Error saving file {filename}: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail={"error": f"Error saving file: {str(e)}"})
+
+    logging.debug(f"Starting to parse file: {filename} with extension: {file_ext}")
+    text = ""
+
+    try:
+        if file_ext == ".pdf":
             try:
                 loader = PyPDFLoader(file_path)
                 docs = loader.load()
                 text = "\n".join([doc.page_content for doc in docs])
-                if not text.strip():
-                    raise ValueError("PyPDFLoader extracted empty text")
                 logging.debug(f"PyPDFLoader extracted text from {filename}: {len(text)} characters")
-                return text
             except Exception as e:
-                logging.error(f"PyPDFLoader failed for {filename}: {str(e)}")
-                logging.debug(f"Falling back to pdfplumber for {filename}")
+                logging.debug(f"PyPDFLoader failed for {filename}: {str(e)}")
                 with pdfplumber.open(file_path) as pdf:
                     text = "\n".join([page.extract_text() or "" for page in pdf.pages])
-                if not text.strip():
-                    raise ValueError("pdfplumber extracted empty text")
                 logging.debug(f"pdfplumber extracted text from {filename}: {len(text)} characters")
-                return text
-        elif ext == '.docx':
-            loader = Docx2txtLoader(file_path)
-            docs = loader.load()
-            return "\n".join([doc.page_content for doc in docs])
-        elif ext == '.pptx':
-            loader = UnstructuredPowerPointLoader(file_path)
-            docs = loader.load()
-            return "\n".join([doc.page_content for doc in docs])
-        elif ext in ['.xlsx', '.xls']:
-            loader = UnstructuredExcelLoader(file_path)
-            docs = loader.load()
-            return "\n".join([doc.page_content for doc in docs])
-        elif ext == '.csv':
-            loader = CSVLoader(file_path)
-            docs = loader.load()
-            return "\n".join([doc.page_content for doc in docs])
-        elif ext == '.json':
-            loader = JSONLoader(file_path, jq_schema='.', text_content=False)
-            docs = loader.load()
-            return "\n".join([doc.page_content for doc in docs])
-        elif ext == '.txt':
-            loader = TextLoader(file_path)
-            docs = loader.load()
-            return "\n".join([doc.page_content for doc in docs])
-        elif ext in ['.png', '.jpg', '.jpeg']:
-            return extract_text_from_image(file_path)
-        elif filename.startswith('http://') or filename.startswith('https://'):
-            return crawl_hyperlink(filename)
-        else:
-            logging.warning(f"Unsupported file type: {ext}")
-            return ""
-    except Exception as e:
-        logging.error(f"Error parsing {filename}: {str(e)}\n{traceback.format_exc()}")
-        return ""
 
-@router.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+        elif file_ext == ".docx":
+            try:
+                loader = Docx2txtLoader(file_path)
+                docs = loader.load()
+                text = "\n".join([doc.page_content for doc in docs])
+                logging.debug(f"Docx2txtLoader extracted text from {filename}: {len(text)} characters")
+            except Exception as e:
+                logging.debug(f"Docx2txtLoader failed for {filename}: {str(e)}")
+                elements = partition(filename=file_path)
+                text = "\n".join([str(el) for el in elements])
+                logging.debug(f"Unstructured partition extracted text from {filename}: {len(text)} characters")
+
+        elif file_ext == ".pptx":
+            try:
+                loader = UnstructuredPowerPointLoader(file_path)
+                docs = loader.load()
+                text = "\n".join([doc.page_content for doc in docs])
+                logging.debug(f"UnstructuredPowerPointLoader extracted text from {filename}: {len(text)} characters")
+            except Exception as e:
+                logging.debug(f"UnstructuredPowerPointLoader failed for {filename}: {str(e)}")
+                elements = partition(filename=file_path)
+                text = "\n".join([str(el) for el in elements])
+                logging.debug(f"Unstructured partition extracted text from {filename}: {len(text)} characters")
+
+        elif file_ext in [".xlsx", ".xls"]:
+            try:
+                loader = UnstructuredExcelLoader(file_path)
+                docs = loader.load()
+                text = "\n".join([doc.page_content for doc in docs])
+                logging.debug(f"UnstructuredExcelLoader extracted text from {filename}: {len(text)} characters")
+            except Exception as e:
+                logging.debug(f"UnstructuredExcelLoader failed for {filename}: {str(e)}")
+                elements = partition(filename=file_path)
+                text = "\n".join([str(el) for el in elements])
+                logging.debug(f"Unstructured partition extracted text from {filename}: {len(text)} characters")
+
+        elif file_ext == ".csv":
+            try:
+                loader = CSVLoader(file_path)
+                docs = loader.load()
+                text = "\n".join([doc.page_content for doc in docs])
+                logging.debug(f"CSVLoader extracted text from {filename}: {len(text)} characters")
+            except Exception as e:
+                logging.debug(f"CSVLoader failed for {filename}: {str(e)}")
+                elements = partition(filename=file_path)
+                text = "\n".join([str(el) for el in elements])
+                logging.debug(f"Unstructured partition extracted text from {filename}: {len(text)} characters")
+
+        elif file_ext == ".json":
+            try:
+                loader = JSONLoader(file_path, jq_schema=".", text_content=False)
+                docs = loader.load()
+                text = "\n".join([doc.page_content for doc in docs])
+                logging.debug(f"JSONLoader extracted text from {filename}: {len(text)} characters")
+            except Exception as e:
+                logging.debug(f"JSONLoader failed for {filename}: {str(e)}")
+                elements = partition(filename=file_path)
+                text = "\n".join([str(el) for el in elements])
+                logging.debug(f"Unstructured partition extracted text from {filename}: {len(text)} characters")
+
+        elif file_ext == ".txt":
+            try:
+                loader = TextLoader(file_path)
+                docs = loader.load()
+                text = "\n".join([doc.page_content for doc in docs])
+                logging.debug(f"TextLoader extracted text from {filename}: {len(text)} characters")
+            except Exception as e:
+                logging.debug(f"TextLoader failed for {filename}: {str(e)}")
+                elements = partition(filename=file_path)
+                text = "\n".join([str(el) for el in elements])
+                logging.debug(f"Unstructured partition extracted text from {filename}: {len(text)} characters")
+
+        elif file_ext in [".png", ".jpg", ".jpeg"]:
+            try:
+                loader = UnstructuredImageLoader(file_path)
+                docs = loader.load()
+                text = "\n".join([doc.page_content for doc in docs])
+                logging.debug(f"UnstructuredImageLoader extracted text from {filename}: {len(text)} characters")
+            except Exception as e:
+                logging.debug(f"UnstructuredImageLoader failed for {filename}: {str(e)}")
+                elements = partition(filename=file_path)
+                text = "\n".join([str(el) for el in elements])
+                logging.debug(f"Unstructured partition extracted text from {filename}: {len(text)} characters")
+
+        else:
+            elements = partition(filename=file_path)
+            text = "\n".join([str(el) for el in elements])
+            logging.debug(f"Unstructured partition extracted text from {filename}: {len(text)} characters")
+
+        if not text.strip():
+            logging.warning(f"No text extracted from {filename}")
+            return None, None
+
+        logging.debug(f"Finished parsing {filename} with {len(text)} characters")
+        return text, filename
+
+    finally:
+        # Clean up file from disk
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logging.debug(f"Deleted temporary file: {file_path}")
+        except Exception as e:
+            logging.error(f"Error deleting temporary file {file_path}: {str(e)}")
+
 
 @router.post("/upload")
-async def upload_files(files: list[UploadFile] = File(...)):
+async def upload_files(files: List[UploadFile] = File(...)):
+    """Upload and index multiple files."""
     texts = []
     filenames = []
-    errors = []
-    for file in files:
-        filename = file.filename
-        logging.debug(f"Processing upload: {filename}")
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        try:
-            content = await file.read()
-            if not content:
-                logging.error(f"Empty file uploaded: {filename}")
-                errors.append(f"Empty file: {filename}")
-                continue
-            with open(file_path, "wb") as f:
-                f.write(content)
-            text = parse_file(file_path, filename)
-            if text:
+
+    if not files:
+        logging.error("No files uploaded")
+        raise HTTPException(status_code=400, detail={"error": "No files uploaded"})
+
+    if len(files) > 10:
+        logging.error(f"Too many files uploaded: {len(files)}. Maximum is 10.")
+        raise HTTPException(status_code=400, detail={"error": f"Too many files uploaded. Maximum is 10."})
+
+    try:
+        current_count = qa_pipeline.get_document_count()
+        if current_count + len(files) > 10:
+            logging.error(
+                f"Upload would exceed maximum of 10 documents. Current: {current_count}, Attempted: {len(files)}")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": f"Cannot upload {len(files)} files. Maximum 10 documents allowed (current: {current_count})."}
+            )
+
+        for file in files:
+            text, filename = await parse_file(file)
+            if text and filename:
+                logging.debug(f"Adding {filename} to index with {len(text)} characters")
                 texts.append(text)
                 filenames.append(filename)
-                logging.debug(f"Successfully processed {filename}: {len(text)} characters")
-            else:
-                logging.warning(f"No text extracted from {filename}")
-                errors.append(f"No text extracted from {filename}")
-        except Exception as e:
-            logging.error(f"Error processing {filename}: {str(e)}\n{traceback.format_exc()}")
-            errors.append(f"Error processing {filename}: {str(e)}")
-    if texts:
-        try:
-            qa_pipeline.index_documents(texts, filenames)
-            return {"message": f"Uploaded and indexed {len(texts)} files", "errors": errors}
-        except Exception as e:
-            logging.error(f"Error indexing documents: {str(e)}\n{traceback.format_exc()}")
-            return {"message": "Failed to index documents", "errors": errors + [f"Indexing error: {str(e)}"]}
-    return {"message": "No valid files uploaded", "errors": errors}
+
+        if not texts:
+            logging.error("No valid documents extracted from uploaded files")
+            raise HTTPException(status_code=400, detail={"error": "No valid documents extracted"})
+
+        qa_pipeline.index_documents(texts, filenames)
+        uploaded_filenames = qa_pipeline.get_uploaded_filenames()
+        logging.debug(f"Indexed {len(uploaded_filenames)} unique filenames: {uploaded_filenames}")
+        return {
+            "message": f"Uploaded and indexed {len(texts)} files",
+            "filenames": uploaded_filenames,
+            "document_count": qa_pipeline.get_document_count()
+        }
+
+    except ValueError as ve:
+        logging.error(f"Error uploading files: {str(ve)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail={"error": str(ve)})
+    except Exception as e:
+        logging.error(f"Error uploading files: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail={"error": f"Error uploading files: {str(e)}"})
+
 
 @router.post("/query")
 async def query(query: str = Form(...)):
+    """Process a query."""
     logging.debug(f"Received query: {query}")
     if not query.strip():
         logging.error("Empty query received")
@@ -156,12 +231,38 @@ async def query(query: str = Form(...)):
         logging.error(f"Error processing query: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail={"error": f"Error processing query: {str(e)}"})
 
+
 @router.post("/summarize")
 async def summarize():
+    """Summarize all indexed documents."""
     logging.debug("Processing summarization request")
     try:
         summary = qa_pipeline.summarize_documents()
         return {"summary": summary}
     except Exception as e:
-        logging.error(f"Error summarizing documents: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail={"error": f"Error summarizing documents: {str(e)}"})
+        logging.error(f"Error processing summarization: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail={"error": f"Error processing summarization: {str(e)}"})
+
+
+@router.post("/delete")
+async def delete_document(filename: str = Form(...)):
+    """Delete a document by filename."""
+    logging.debug(f"Received delete request for: {filename}")
+    if not filename.strip():
+        logging.error("Empty filename received")
+        raise HTTPException(status_code=400, detail={"error": "Filename cannot be empty"})
+    try:
+        success = qa_pipeline.delete_document(filename)
+        if not success:
+            logging.error(f"Failed to delete document: {filename}")
+            raise HTTPException(status_code=500, detail={"error": f"Failed to delete document: {filename}"})
+        uploaded_filenames = qa_pipeline.get_uploaded_filenames()
+        logging.debug(f"Deleted document: {filename}. Remaining documents: {uploaded_filenames}")
+        return {
+            "message": f"Deleted document: {filename}",
+            "filenames": uploaded_filenames,
+            "document_count": qa_pipeline.get_document_count()
+        }
+    except Exception as e:
+        logging.error(f"Error deleting document: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail={"error": f"Error deleting document: {str(e)}"})

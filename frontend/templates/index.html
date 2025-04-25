@@ -3,153 +3,110 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Q&A System</title>
+    <title>Document Q&A System</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            max-width: 800px;
-            margin-left: auto;
-            margin-right: auto;
-        }
-        h1 {
-            text-align: center;
-        }
-        .section {
-            margin-bottom: 20px;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        input[type="file"], input[type="text"], button {
-            padding: 10px;
-            margin: 5px 0;
-            width: 100%;
-            box-sizing: border-box;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: auto; }
         #response, #query-response, #summary-response {
             margin-top: 10px;
             padding: 10px;
-            border: 1px solid #ddd;
-            min-height: 50px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+            white-space: pre-wrap;
         }
-        .error {
-            color: red;
-        }
+        #document-list p { margin: 5px 0; }
+        button { margin-left: 10px; }
+        #document-count { font-weight: bold; color: #006600; }
     </style>
 </head>
 <body>
-    <h1>Q&A System</h1>
+    <div class="container">
+        <h1>Document Q&A System</h1>
 
-    <div class="section">
-        <h2>Upload Files</h2>
-        <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
-            <div class="form-group">
-                <input type="file" name="files" multiple accept=".pdf,.docx,.pptx,.xlsx,.xls,.csv,.json,.txt,.png,.jpg,.jpeg">
-            </div>
+        <h2>Upload Documents</h2>
+        <form id="upload-form" enctype="multipart/form-data">
+            <input type="file" id="files" name="files" multiple>
             <button type="submit">Upload</button>
         </form>
         <div id="response"></div>
-    </div>
+        <div id="document-count">Documents: 0/10</div>
+        <div id="document-list"></div>
 
-    <div class="section">
         <h2>Ask a Question</h2>
-        <form id="query-form" action="/query" method="post" enctype="application/x-www-form-urlencoded">
-            <div class="form-group">
-                <input type="text" name="query" placeholder="Enter your question" required>
-            </div>
+        <form id="query-form">
+            <input type="text" id="query" name="query" placeholder="Enter your query...">
             <button type="submit">Submit Query</button>
         </form>
         <div id="query-response"></div>
-    </div>
 
-    <div class="section">
         <h2>Summarize Documents</h2>
-        <form id="summarize-form" action="/summarize" method="post">
-            <button type="submit">Summarize</button>
-        </form>
+        <button onclick="summarizeDocuments()">Summarize</button>
         <div id="summary-response"></div>
     </div>
 
     <script>
-        // Handle form submissions with Fetch API
-        function handleFormSubmission(formId, responseDivId, successCallback) {
-            const form = document.getElementById(formId);
-            const responseDiv = document.getElementById(responseDivId);
-
-            form.addEventListener('submit', async (event) => {
-                event.preventDefault();
-                responseDiv.innerHTML = 'Processing...';
-
-                const formData = new FormData(form);
-                console.log(`Submitting ${formId} with data:`, Object.fromEntries(formData));
-
-                try {
-                    const response = await fetch(form.action, {
-                        method: 'POST',
-                        body: formData
-                    });
-                    console.log(`Response status for ${formId}: ${response.status}`);
-                    console.log(`Response Content-Type: ${response.headers.get('Content-Type')}`);
-
-                    let data;
-                    if (response.headers.get('Content-Type')?.includes('application/json')) {
-                        data = await response.json();
-                        console.log(`Response data for ${formId}:`, data);
-                    } else {
-                        data = { error: await response.text() };
-                        console.log(`Non-JSON response for ${formId}:`, data.error);
-                    }
-
-                    responseDiv.innerHTML = '';
-                    if (data.message || data.response || data.summary) {
-                        if (data.message) {
-                            responseDiv.innerHTML += `<strong>Message:</strong> ${data.message}`;
-                        }
-                        if (data.errors && data.errors.length > 0) {
-                            responseDiv.innerHTML += '<br><strong>Errors:</strong><ul class="error">' +
-                                data.errors.map(error => `<li>${error}</li>`).join('') + '</ul>';
-                        }
-                        if (successCallback) {
-                            successCallback(data, responseDiv);
-                        }
-                    } else if (data.error) {
-                        responseDiv.innerHTML = `<span class="error">Error: ${data.error}</span>`;
-                    } else {
-                        responseDiv.innerHTML = `<span class="error">Unexpected response format: ${JSON.stringify(data)}</span>`;
-                    }
-                } catch (error) {
-                    console.error(`Error in ${formId}:`, error);
-                    responseDiv.innerHTML = `<span class="error">Network error: ${error.message}</span>`;
-                }
+        async function updateDocumentList() {
+            const response = await fetch('/get_uploaded_filenames', { method: 'GET' });
+            const filenames = await response.json();
+            const list = document.getElementById('document-list');
+            list.innerHTML = '';
+            filenames.forEach(filename => {
+                const p = document.createElement('p');
+                p.textContent = filename;
+                const button = document.createElement('button');
+                button.textContent = 'Delete';
+                button.onclick = () => deleteDocument(filename);
+                p.appendChild(button);
+                list.appendChild(p);
             });
+            document.getElementById('document-count').textContent = `Documents: ${filenames.length}/10`;
         }
 
-        // Initialize form handlers
-        handleFormSubmission('upload-form', 'response');
-        handleFormSubmission('query-form', 'query-response', (data, div) => {
-            if (data.response) {
-                div.innerHTML = `<strong>Answer:</strong> ${data.response}`;
-                if (data.references && data.references.length > 0) {
-                    div.innerHTML += '<br><strong>References:</strong><ul>' +
-                        data.references.map(ref => `<li>${ref.filename}</li>`).join('') + '</ul>';
-                }
+        document.getElementById('upload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const files = document.getElementById('files').files;
+            const formData = new FormData();
+            for (let file of files) {
+                formData.append('files', file);
             }
+            const response = await fetch('/upload', { method: 'POST', body: formData });
+            const result = await response.json();
+            document.getElementById('response').textContent = result.message;
+            updateDocumentList();
         });
-        handleFormSubmission('summarize-form', 'summary-response', (data, div) => {
-            if (data.summary) {
-                div.innerHTML = `<strong>Summary:</strong> ${data.summary}`;
-            }
+
+        document.getElementById('query-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const query = document.getElementById('query').value;
+            const response = await fetch('/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `query=${encodeURIComponent(query)}`
+            });
+            const result = await response.json();
+            document.getElementById('query-response').innerHTML = `Answer: ${result.response}<br>References: ${result.references.join(', ')}`;
+            document.getElementById('query').value = '';
         });
+
+        async function summarizeDocuments() {
+            const response = await fetch('/summarize', { method: 'POST' });
+            const result = await response.json();
+            document.getElementById('summary-response').innerHTML = `Summary: ${result.summary}`;
+        }
+
+        async function deleteDocument(filename) {
+            const response = await fetch('/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `filename=${encodeURIComponent(filename)}`
+            });
+            const result = await response.json();
+            document.getElementById('response').textContent = result.message;
+            updateDocumentList();
+        }
+
+        // Initial load
+        updateDocumentList();
     </script>
 </body>
 </html>
