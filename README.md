@@ -114,7 +114,7 @@ Rust (for some Python packages): Install via rustup.
 Setup
 
 Clone the Repository:
-git clone https://github.com/your-username/llm_qna_app.git
+git clone https://github.com/Sonal-S-3009/LLM_QnA_System.git
 cd llm_qna_app
 
 
